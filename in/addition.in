@@ -1,0 +1,11 @@
+# f = (g + h) - (i + j)
+
+addi $s1, $zero, 4 # g = 4
+addi $s2, $zero, 3 # h = 3
+addi $s3, $zero, 2 # i = 2
+addi $s4, $zero, 1 # j = 1
+
+add $t0, $s1, $s2
+add $t1, $s3, $s4
+
+sub $s0, $t0, $t1

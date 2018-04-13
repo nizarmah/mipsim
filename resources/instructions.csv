@@ -1,0 +1,12 @@
+Instruction,Format,Opcode,Funct
+add,R,0,32
+sub,R,0,34
+and,R,0,36
+or,R,0,37
+slt,R,0,42
+beq,I,4,
+bne,I,5,
+addi,I,8,
+lw,I,35,
+sw,I,43,
+j,J,2,

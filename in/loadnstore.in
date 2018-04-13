@@ -1,0 +1,6 @@
+addi $s1, $zero, 24
+addi $s2, $zero, 123
+addi $s3, $zero, 16
+
+sw $s1, $s2
+lw $s0, 8($s3)
