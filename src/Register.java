@@ -46,7 +46,10 @@ public class Register {
     // Get Register Number
     // -----------------------------------------------------------------------------------------------------------------
     public static int getRegister(String register) {
-        if (register.equals("$zero"))
+        // Returns Register's index in the Array of 32 registers
+        // According to how the register is named
+
+        if (register.equals("$0"))
             return 0;
 
         String[] info = register.split("");

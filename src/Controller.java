@@ -1,6 +1,7 @@
 import java.io.File;
-import java.io.FileWriter;
 import java.io.PrintWriter;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class Controller {
     /* Controller Explained
@@ -15,122 +16,150 @@ public class Controller {
     private ALU alu;
     private Memory memory;
     private Register register;
+    private Assembler assembler;
 
-    // Program Counter of which line the Program points to in memory
-    private int programCounter;
+    private PrintWriter printWriter;
 
-    // Instruction Register stores the instruction at line in programCounter
+    // Instruction Register stores the instruction we are on currently
     private String instructionRegister;
+
+    volatile private boolean jumpPipeline;
+    private final Lock pipelineLock = new ReentrantLock();
 
     // Constructor of Controller
     // -----------------------------------------------------------------------------------------------------------------
-    public Controller () {
-        alu      = ALU.getInstance();
-        memory   = Memory.getInstance();
-        register = Register.getInstance();
+    public Controller (File inputFile, File outputFile) {
+        alu       = ALU.getInstance();
+        memory    = Memory.getInstance();
+        register  = Register.getInstance();
+        assembler = new Assembler(inputFile);
 
-        programCounter = 0;
+        try {
+            printWriter = new PrintWriter(outputFile);
+        } catch (Exception e) {
+            this.exit(e.getMessage());
+        }
+
         instructionRegister = "";
     }
     // -----------------------------------------------------------------------------------------------------------------
 
-    // Operate Instruction from Instruction Register
-    // -----------------------------------------------------------------------------------------------------------------
-    public void operateInstructionRegister () {
-        // Point out which format this is
-        // To tell the ALU what to do
-        int opCode = Integer.parseInt(instructionRegister.substring(0, 6), 2);
-        if (opCode == 0) { // Check if it is R format
-            int rs = Integer.parseInt(instructionRegister.substring(6, 11), 2);
-            int rt = Integer.parseInt(instructionRegister.substring(11, 16), 2);
-            int rd = Integer.parseInt(instructionRegister.substring(16, 21), 2);
+    public void print(String[] instruction) {
+        printWriter.println();
 
-            // Ignoring Shifting since we have no SLL or SRL
+        printWriter.println(instruction[1]);
+        printWriter.println(instruction[0]);
+        printWriter.println();
 
-            // Get Operation's Function and Switch it Between Cases
-            // Taken from the 'resources/instructions.csv' to know
-            // Which instruction the ALU must perform
-            int func = Integer.parseInt(instructionRegister.substring(26, 32), 2);
-            switch (func) {
-                case 32:
-                    alu.add(rd, rs, rt);
-                    break;
-                case 34:
-                    alu.sub(rd, rs, rt);
-                    break;
-                case 36:
-                    alu.and(rd, rs, rt);
-                    break;
-                case 37:
-                    alu.or(rd, rs, rt);
-                    break;
-                case 42:
-                    alu.slt(rd, rs, rt);
-                    break;
-            }
-        } else if (opCode == 2) { // Check if it is J format
-            int address = Integer.parseInt(instructionRegister.substring(6, 26), 2);
+        printWriter.println(register);
+        printWriter.println();
 
-            alu.jump(address);
-        } else { // Then this is definitely I format
-            int rs = Integer.parseInt(instructionRegister.substring(6, 11), 2);
-            int rd = Integer.parseInt(instructionRegister.substring(11, 16), 2);
+        printWriter.println("------------------------------------------------------------------------------------");
 
-            int address = Integer.parseInt(instructionRegister.substring(16, 32), 2);
-
-            switch (opCode) {
-                case 4:
-                    alu.beq(rd, rs, address);
-                    break;
-                case 5:
-                    alu.bne(rd, rs, address);
-                    break;
-                case 8:
-                    alu.addi(rd, rs, address);
-                    break;
-                case 35:
-                    alu.lw(rd, rs, address);
-                    break;
-                case 43:
-                    alu.sw(rd, rs, address);
-                    break;
-            }
-        }
+        printWriter.flush();
     }
+
+    // Controller MIPS Simulation
     // -----------------------------------------------------------------------------------------------------------------
+    public void startSimulation () {
+        String[] instruction;
 
-    // Controller MIPS Simulator
-    // -----------------------------------------------------------------------------------------------------------------
-    public void simulate (File inputFile, File outputFile) {
-        Assembler assembler = new Assembler(inputFile);
+        // Keep track of Current Register and Of Old Register
+        // In Pipelining, we need to make sure that Instructions are not dependent on each other
+        // Because if they are, we need to delay the other and thus, delay all the other instructions
+        int[] registerInstruction;
+        int[] previousInstruction = null;
 
-        try {
-            PrintWriter printWriter = new PrintWriter(new FileWriter(outputFile));
+        // Also we need to make sure that the Pipeline won't be jumping or changing Sequence
+        // Because if it is, we don't want to end up decoding the instruction after
+        // Since we are not gonna be going to it, but jumping to a different one
+        jumpPipeline = false;
 
-            String[] instruction;
-            while ((instruction = assembler.nextInstruction()) != null) {
-                instructionRegister = memory.loadInstruction(instruction[0]);
-                operateInstructionRegister();
 
-                printWriter.println(instruction[1]);
-                printWriter.println(instruction[0]);
-                printWriter.println();
-                printWriter.println(register);
-                printWriter.println();
-                printWriter.println("---------------------------------------------------------------------------------");
-                printWriter.println();
+        // Keep going through the program until we have no further instructions
+        while ((instruction = assembler.nextInstruction()) != null) {
+            // Load the instruction into Memory and save it into the InstructionRegister
+            // Since Memory.loadInstruction returns the Instruction[0] in the parameter
+            instructionRegister = memory.loadInstruction(instruction[0]);
+            // Decode the Instruction using the Assembler, and store it
+            registerInstruction = assembler.decodeInstruction(instructionRegister);
 
-                System.out.println(memory);
-                System.out.println("---------------------------------------------------------------------------------");
-                System.out.println();
+            // Setting some Temporary Variables in order to use them in the Thread
+            final String[] instructionTemp = instruction;
+            final int[] registerInstructionTemp = registerInstruction;
 
-                printWriter.flush();
+            // If the previous Instruction was a Jump
+            // Then do not proceed by executing or Decoding the Statement
+            if (registerInstruction[0] == 2) {
+                // Therefore, we make the ALU reset to the specified Address
+                // That address will be returned from the ALU Executed Instruction
+                assembler.jumpTo(alu.executeInstruction(registerInstruction));
+
+                // Removing Previous Instruction for this Operation
+                // Because we are sure that Jump isn't dependent with anything
+                previousInstruction = null;
+
+                continue;
             }
 
-            printWriter.close();
-        } catch (Exception e) {
-//            Controller.exit("Controller : " + e.getMessage());
-            e.printStackTrace();
+            // Pipeline Locking Will Pause While Loop until It is Notified by Thread that the instruction was executed
+
+            // Check if Current Instruction is a BEQ or BNE
+            // Then wait BEQ or BNE Output before Execution
+            // Because we are either gonna proceed correctly
+            // Or we are gonna make a Jump in our Sequence
+            if (registerInstruction[0] == 4 || registerInstruction[0] == 5)
+                pipelineLock.lock();
+
+            // Check if Previous and Current Instructions
+            // Are Independent, If not, Stall Pipeline
+            if (previousInstruction != null && assembler.areDependent(registerInstruction, previousInstruction))
+                pipelineLock.lock();
+
+            previousInstruction = registerInstruction;
+
+            // Check if Pipeline was Jumped through BEQ or BNE
+            // If true, then Ignore current Instruction because
+            // We are gonna be changing our sequence in the code
+            if (jumpPipeline) {
+                previousInstruction = null;
+
+                jumpPipeline = false;
+                continue;
+            }
+
+            // Thread that will Execute the Instruction
+            new Thread(() -> {
+                // Give a bit of delay cause of errors
+                // TODO: Understand why the hell this bullshit occurs
+                try {
+                    Thread.sleep(50);
+                } catch (Exception e) {  }
+
+                // Get the Response from the Execution Instruction
+                int address = alu.executeInstruction(registerInstructionTemp);
+                // Make sure the response is not -1
+                if (address != -1) {
+                    // If it isn't then we have a sequence jump
+                    // So JUMP the pipeline, JUMP JUMP JUMP
+                    assembler.jumpTo(assembler.getProgramCounter() + address);
+                    jumpPipeline = true;
+                }
+
+                // Notify the Pipeline that the Thread Executed
+                try {
+                    pipelineLock.notify();
+                } catch (Exception e) { }
+
+                // Print the Registers with the Instruction that Ran
+                print(instructionTemp);
+            }).start();
+
+            // Only added this for printing purposes, bad printing!
+            // TODO: Understand why the hell this bullshit occurs
+            try {
+                Thread.sleep(50);
+            } catch (Exception e) {  }
         }
     }
     // -----------------------------------------------------------------------------------------------------------------
@@ -146,7 +175,8 @@ public class Controller {
     // Controller Executor
     // -----------------------------------------------------------------------------------------------------------------
     public static void main(String[] args) {
-        String fileName = "loadnstore";
+        String[] examples = { "addition", "loadnstore", "loop" };
+        String fileName = examples[2];
 
         File inputFile  = new File("in/" + fileName + ".in");
         File outputFile = new File("out/" + fileName + ".out");
@@ -162,8 +192,8 @@ public class Controller {
             }
         }
 
-        Controller controller = new Controller();
-        controller.simulate(inputFile, outputFile);
+        Controller controller = new Controller(inputFile, outputFile);
+        controller.startSimulation();
     }
     // -----------------------------------------------------------------------------------------------------------------
 }

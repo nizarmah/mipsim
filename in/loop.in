@@ -1,0 +1,5 @@
+addi $s1, $0, 10
+beq $s0, $s1, 2
+addi $s0, $s0, 1
+j 2
+add $s2, $s0, $s1
