@@ -39,6 +39,8 @@ Comparing those two instructions would be by comparing the addresses of the regi
 In addition, we need to stall after every BEQ or BNE statement, to know if we are gonna be changing sequence or not.
 Moreover, we need to account for any Jumps in the sequence and not bother to decode the instruction after.
 
+When we have a Jump instruction, the MIPS Pipeline proceeds only to fetch the next instruction, and then it prevents decoding the fetched instruction, but fetches a new instruction.
+
 ### Apply MIPS Pipeline Process
 
 First of all, we need to create all the required parts of the MIPS Simulator.
@@ -54,3 +56,23 @@ The ALU will be responsible for the Executing, Memory, and Writeback stages.
 > If you wish for further explanation on the role of each in the program, you can proceed to reading the comments in the top of each class.
 
 Because we wish to simulate a MIPS Pipeline, we will be discussing only the Controller and how it works in Java.
+
+Starting the simulation, we have some variables that we will be explaining when we need to use them.
+So, let's start by discussing the `while` loop. The controller will keep simulating until there are no instructions left to execute, or when the Assembler will return `null`.
+
+This instruction we read is an array of 2 strings. The first string is the 4 byte word of the instruction; whereas, the second string is the string converted to the 4 byte word ( used for printing purposes ).
+After fetching, we decode the instruction so we know what the operation is and what the registers are, etc...
+
+Before checking if the instruction is dependent on the one before it, we discussed the special case of the Jump instruction before; thus, we will be make sure that the instruction is not a Jump instruction, because, if it is, we will be jumping the Assembler to the new address and new instruction.
+
+If it is not a Jump instruction, it can also include a jump, such as a BEQ or BNE. So, we need to make sure it is not one of those two.
+However, if it is we need to make sure that they are not gonna change our sequence. So we wait for the operation to execute. Therefore, we will end up stalling the Pipeline by pausing / locking the `while` loop. Once we get the response from the ALU, we'll know if there is a jump by the positive value returned, or not otherwise. This response from the execution thread will notify the lock to continue the running the while loop.
+Then, we'll proceed to jump or not. If we jump, the `jumpPipeline` boolean will be responsible for not executing the instruction we are currently on.
+
+After checking for special instructions, we need to make sure that the instruction we are at and the instruction before it are not by any means dependent on each other. If they are, then we also stall / lock the Pipeline is order to await the response from the execution thread, which will unlock the pipeline.
+
+Now, why an execution thread you might ask. The MIPS Pipeline proceeds to fetch the new instruction as soon as the one before it starts decoding. Therefore, the fetching of the instructions is synchronous, meaning runs in a sequence, one after the other. This leads us to say that the execution does not affect this sequence. Therefore, the execution must be running asynchronously from the latter sequence.
+
+Then, we proceed to execute the instruction, and check if its response is negative.
+If the response is positive, then there is a jump involved. So we do so...
+And then at last, try to notify the locks that the Pipeline must continue and no longer be stalled.
